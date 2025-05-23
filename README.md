@@ -20,9 +20,12 @@
 
 ## 安装说明
 
-1. 下载 `VideoComparisonTool` 文件夹
+1. 下载百度网盘分享的文件：VideoComparisonTool.zip
+链接: https://pan.baidu.com/s/1dQ6t1MG9DCM_OYFb53AG0w?pwd=6666 提取码: 6666 
 2. 解压到任意目录
 3. 运行 `VideoComparisonTool.exe`
+
+
 
 ## 使用方法
 
