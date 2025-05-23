@@ -2,6 +2,9 @@
 
 一个简单的视频浏览和对比工具，支持同时播放和比较多个视频文件。
 
+![image](https://github.com/user-attachments/assets/9b596c0f-dc2a-494b-b2f5-2ff57844945e)
+
+
 ## 功能特点
 
 - 同时播放1-9个视频文件
