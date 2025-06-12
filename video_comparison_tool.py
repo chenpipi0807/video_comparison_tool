@@ -1,9 +1,11 @@
 import sys
 import os
+import tempfile
+import subprocess
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
                             QPushButton, QSlider, QLabel, QFileDialog, QGridLayout, 
-                            QSizePolicy, QComboBox, QStyle)
-from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal, QSize
+                            QSizePolicy, QComboBox, QStyle, QSpinBox)
+from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal, QSize, QThread, QProcess
 from PyQt6.QtGui import QPalette, QColor, QIcon, QFont
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput, QMediaDevices
 from PyQt6.QtMultimediaWidgets import QVideoWidget
@@ -151,6 +153,7 @@ class VideoComparisonTool(QMainWindow):
         super().__init__()
         self.setWindowTitle("视频对比工具")
         self.setMinimumSize(1000, 700)
+        self.setAcceptDrops(True)  # 启用拖放支持
         
         # 主控件和布局
         self.central_widget = QWidget()
@@ -199,11 +202,36 @@ class VideoComparisonTool(QMainWindow):
         self.mute_all_button.setFixedSize(80, 30)
         self.mute_all_button.toggled.connect(self.toggle_mute_all)
         
-        # 布局控制
-        self.layout_combo = QComboBox()
-        self.layout_combo.addItems([f"{i}x{j}" for i in range(1, 4) for j in range(1, 4)])
-        self.layout_combo.setCurrentText("2x2")
-        self.layout_combo.currentTextChanged.connect(self.update_grid_layout)
+        # 布局类型
+        self.layout_type_label = QLabel("布局类型:")
+        self.layout_type_combo = QComboBox()
+        self.layout_type_combo.addItems(["Z字形布局", "普通网格"])
+        self.layout_type_combo.setCurrentIndex(0)  # 默认使用Z字形布局
+        self.layout_type_combo.currentIndexChanged.connect(self.update_grid_layout)
+        
+        # 每行视频数量
+        self.videos_per_row_label = QLabel("每行视频数:")
+        self.videos_per_row_spinbox = QSpinBox()
+        self.videos_per_row_spinbox.setRange(1, 10)
+        self.videos_per_row_spinbox.setValue(3)
+        self.videos_per_row_spinbox.valueChanged.connect(self.update_grid_layout)
+        
+        # 导出视频按钮
+        self.export_button = QPushButton("导出视频")
+        self.export_button.setFixedSize(100, 30)
+        self.export_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4caf50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 5px 10px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.export_button.clicked.connect(self.export_video)
         
         # 进度条
         self.master_slider = QSlider(Qt.Orientation.Horizontal)
@@ -271,8 +299,13 @@ class VideoComparisonTool(QMainWindow):
         control_layout.addSpacing(10)
         control_layout.addWidget(self.mute_all_button)
         control_layout.addSpacing(20)
-        control_layout.addWidget(QLabel("布局: "))
-        control_layout.addWidget(self.layout_combo)
+        control_layout.addWidget(self.layout_type_label)
+        control_layout.addWidget(self.layout_type_combo)
+        control_layout.addSpacing(10)
+        control_layout.addWidget(self.videos_per_row_label)
+        control_layout.addWidget(self.videos_per_row_spinbox)
+        control_layout.addSpacing(10)
+        control_layout.addWidget(self.export_button)
         control_layout.addSpacing(20)
         control_layout.addWidget(self.volume_label)
         control_layout.addWidget(self.volume_slider)
@@ -357,9 +390,6 @@ class VideoComparisonTool(QMainWindow):
         if file_dialog.exec():
             file_paths = file_dialog.selectedFiles()
             for file_path in file_paths:
-                if len(self.players) >= 9:  # 最多9个视频
-                    break
-                    
                 player = VideoPlayer(len(self.players))
                 player.load_video(file_path)
                 self.players.append(player)
@@ -379,20 +409,36 @@ class VideoComparisonTool(QMainWindow):
         for i in reversed(range(self.grid_layout.count())): 
             self.grid_layout.itemAt(i).widget().setParent(None)
         
-        # 获取新的网格大小
-        rows, cols = map(int, self.layout_combo.currentText().split('x'))
-        self.current_grid_size = (rows, cols)
+        # 获取每行视频数量
+        videos_per_row = self.videos_per_row_spinbox.value()
+        
+        # 如果没有播放器，直接返回
+        if not self.players:
+            return
+            
+        # 计算行数
+        num_videos = len(self.players)
+        rows = (num_videos + videos_per_row - 1) // videos_per_row  # 向上取整
         
         # 添加播放器到网格
-        for i, player in enumerate(self.players):
-            if i >= rows * cols:
-                player.hide()
-                continue
+        if self.layout_type_combo.currentIndex() == 0:  # Z字形布局
+            for i, player in enumerate(self.players):
+                row = i // videos_per_row
                 
-            row = i // cols
-            col = i % cols
-            self.grid_layout.addWidget(player, row, col)
-            player.show()
+                # 如果是奇数行，则反向计算列位置
+                if row % 2 == 0:  # 偶数行（第一行是0）
+                    col = i % videos_per_row
+                else:  # 奇数行
+                    col = videos_per_row - 1 - (i % videos_per_row)
+                
+                self.grid_layout.addWidget(player, row, col)
+                player.show()
+        else:  # 普通网格布局
+            for i, player in enumerate(self.players):
+                row = i // videos_per_row
+                col = i % videos_per_row
+                self.grid_layout.addWidget(player, row, col)
+                player.show()
     
     def toggle_playback(self):
         if not self.players:
@@ -469,11 +515,182 @@ class VideoComparisonTool(QMainWindow):
         hours = int(minutes / 60)
         return f"{hours:02d}:{minutes % 60:02d}:{seconds % 60:02d}"
     
+    def dragEnterEvent(self, event):
+        # 检查是否有视频文件被拖拽
+        if event.mimeData().hasUrls():
+            # 只接受本地文件
+            for url in event.mimeData().urls():
+                if url.isLocalFile() and self.is_video_file(url.toLocalFile()):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+    
+    def dropEvent(self, event):
+        # 处理被拖拽的视频文件
+        files = [url.toLocalFile() for url in event.mimeData().urls() if url.isLocalFile() and self.is_video_file(url.toLocalFile())]
+        if files:
+            # 为每个被拖拽的视频创建播放器
+            for file_path in files:
+                player = VideoPlayer(len(self.players))
+                player.load_video(file_path)
+                self.players.append(player)
+                
+                # 连接主进度条更新
+                player.media_player.durationChanged.connect(self.update_master_duration)
+                player.media_player.positionChanged.connect(self.update_master_position)
+                
+                # 如果这是第一个视频，设置为主控制
+                if len(self.players) == 1:
+                    self.master_slider.setRange(0, player.media_player.duration())
+            
+            self.update_grid_layout()
+            event.acceptProposedAction()
+    
+    def dragMoveEvent(self, event):
+        # 允许在窗口上拖动
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+    
+    def is_video_file(self, file_path):
+        # 检查文件是否为支持的视频格式
+        video_extensions = [".mp4", ".avi", ".mkv", ".mov", ".wmv", ".flv"]
+        return any(file_path.lower().endswith(ext) for ext in video_extensions)
+        
     def closeEvent(self, event):
         # 清理资源
         for player in self.players:
             player.media_player.stop()
         event.accept()
+    
+    def export_video(self):
+        # 如果没有视频，直接返回
+        if not self.players:
+            print("没有视频可以导出")
+            return
+            
+        # 暂停所有视频
+        for player in self.players:
+            player.media_player.pause()
+            
+        # 选择保存路径
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, 
+            "保存导出视频", 
+            os.path.expanduser("~") + "/output_video.mp4", 
+            "视频文件 (*.mp4)"
+        )
+        
+        if not output_path:
+            return  # 用户取消了保存对话框
+        
+        # 获取所有视频路径
+        video_paths = []
+        for player in self.players:
+            media_url = player.media_player.source().toLocalFile()
+            if media_url:
+                video_paths.append(media_url)
+        
+        # 获取当前的视频每行数量和布局类型
+        videos_per_row = self.videos_per_row_spinbox.value()
+        is_zigzag = self.layout_type_combo.currentIndex() == 0
+        
+        # 使用FFmpeg合并视频
+        try:
+            # 创建临时文件夹用于处理
+            temp_dir = tempfile.mkdtemp()
+            
+            # 准备FFmpeg命令
+            ffmpeg_cmd = ["ffmpeg", "-y"]
+            
+            # 为每个视频添加输入
+            for i, video_path in enumerate(video_paths):
+                ffmpeg_cmd.extend(["-i", video_path])
+            
+            # 计算行数
+            num_videos = len(video_paths)
+            rows = (num_videos + videos_per_row - 1) // videos_per_row
+            
+            # 构建FFmpeg网格布局的筛选器复杂命令
+            filter_complex = []
+            
+            # 首先分析所有视频的尺寸以决定基准格式
+            # 使用缩放比例而不是固定大小
+            analyze_cmd = ["ffmpeg"]
+            # 分析每个视频的原始尺寸
+            aspect_ratios = []
+            
+            # 默认使用更小的padding和间距
+            # 视频之间仅留小空间(设置为1)
+            padding = 1
+            
+            # 添加xstack格式的视频网格
+            row_stacks = []
+            for row in range(rows):
+                row_inputs = []
+                for col in range(videos_per_row):
+                    idx = row * videos_per_row + col
+                    
+                    # 如果使用Z字形布局且是奇数行，则反向排序
+                    if is_zigzag and row % 2 == 1:
+                        idx = row * videos_per_row + (videos_per_row - 1 - col)
+                        
+                    if idx < num_videos:
+                        # 保持原始比例，使用缩放而不是填充
+                        # 使用更高的分辨率提高清晰度（640x360而不是320x180）
+                        # 使用简单的缩放命令，避免复杂的表达式
+                        filter_complex.append(f"[{idx}:v]scale=640:-2,setsar=1[v{idx}]")
+                        row_inputs.append(f"[v{idx}]")
+                    else:
+                        # 如果没有够的视频，添加适合分辨率的空白背景
+                        # 使用正确的FFmpeg color滤镜格式：s=宽度x高度
+                        filter_complex.append(f"color=black:s=640x360:d=999999[v{idx}]")
+                        row_inputs.append(f"[v{idx}]")
+
+                
+                # 水平合并每一行的视频，不使用padding参数避免兼容性问题
+                row_stacks.append(f"{''.join(row_inputs)}hstack=inputs={len(row_inputs)}[row{row}]")
+            
+            # 垂直合并所有行
+            filter_complex.extend(row_stacks)
+            rows_inputs = ''.join([f"[row{i}]" for i in range(rows)])
+            filter_complex.append(f"{rows_inputs}vstack=inputs={rows}[v]")
+            
+            # 为整个视频添加统一小边距
+            filter_complex.append(f"[v]pad=iw+10:ih+10:5:5:black[vout]")
+            
+            # 最终输出使用vout而不是v
+            output_label = "vout"
+            
+            # 添加最终的复合筛选器到FFmpeg命令
+            ffmpeg_cmd.extend(["-filter_complex", ';'.join(filter_complex)])
+            
+            # 添加输出参数，使用更高的质量和适当的编码设置以确保画质
+            ffmpeg_cmd.extend([
+                "-map", f"[{output_label}]", 
+                "-c:v", "libx264", 
+                "-preset", "slow",  # 使用更慢但质量更高的预设
+                "-crf", "16",  # 质量设置更高，数值越小质量越高、8-28之间，16已非常高
+                "-pix_fmt", "yuv420p",  # 确保在不同播放器中兼容
+                "-tune", "film",  # 优化处理电影内容
+                output_path
+            ])
+            
+            # 执行FFmpeg命令
+            subprocess.run(ffmpeg_cmd, check=True)
+            
+            # 清理临时目录
+            for file in os.listdir(temp_dir):
+                os.unlink(os.path.join(temp_dir, file))
+            os.rmdir(temp_dir)
+            
+            print(f"导出成功: {output_path}")
+            
+        except Exception as e:
+            print(f"导出错误: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
