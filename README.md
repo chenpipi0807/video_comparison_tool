@@ -2,7 +2,8 @@
 
 一个简单的视频浏览和对比工具，支持同时播放和比较多个视频文件。
 
-![image](https://github.com/user-attachments/assets/fc2accab-9e32-4113-bde3-2169911fe543)
+![image](https://github.com/user-attachments/assets/ddeb656d-09b7-412d-8687-c9ceca0f3cec)
+
 
 ## 0612更新
 -新增了视频导出，移除了视频数量限制
