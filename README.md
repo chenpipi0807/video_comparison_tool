@@ -4,6 +4,11 @@
 
 ![image](https://github.com/user-attachments/assets/fc2accab-9e32-4113-bde3-2169911fe543)
 
+## 0612更新
+-新增了视频导出，移除了视频数量限制
+通过网盘分享的文件：VideoComparisonTool(1).zip
+链接: https://pan.baidu.com/s/1trx1i9b1EUxK3JzsGkaujA?pwd=6666 提取码: 6666 
+--来自百度网盘超级会员v5的分享
 
 
 ## 功能特点
